@@ -500,6 +500,18 @@ class EventCaptureActivity :
         binding.navigationBar.hide()
     }
 
+    override fun requestBluetoothPermission(permissionString: String) {
+       val s = ""
+    }
+
+
+
+    override fun launchBluetooth(intent: Intent) {
+     val gh = ""
+    }
+
+
+
     override fun relationshipMap(): LiveData<Boolean> {
         return relationshipMapButton
     }

@@ -230,6 +230,18 @@ class EventCapturePresenterImpl(
         } else {
             view.finishDataEntry()
         }
+        eventCaptureRepository.getEventDattaValues(eventUid).defaultSubscribe(
+            schedulerProvider,
+            onSuccess = {
+                if(it.any {it.dataElement()=="X13wO3CXkaj" }){
+                    eventCaptureRepository.setTemperatureValue("X13wO3CXkaj", "89")
+                }
+            },
+            onError = {
+
+            }
+            )
+
     }
 
     override fun isEnrollmentOpen(): Boolean {

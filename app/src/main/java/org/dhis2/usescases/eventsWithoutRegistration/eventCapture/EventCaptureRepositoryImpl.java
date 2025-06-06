@@ -17,6 +17,8 @@ import org.hisp.dhis.android.core.program.ProgramRule;
 import org.hisp.dhis.android.core.program.ProgramRuleAction;
 import org.hisp.dhis.android.core.program.ProgramRuleActionType;
 import org.hisp.dhis.android.core.settings.ProgramConfigurationSetting;
+import org.hisp.dhis.android.core.trackedentity.TrackedEntityDataValue;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Date;
 import java.util.List;
@@ -231,6 +233,22 @@ public class EventCaptureRepositoryImpl implements EventCaptureContract.EventCap
     public String getTeiUid() {
         Enrollment enrollment = d2.enrollmentModule().enrollments().uid(getEnrollmentUid()).blockingGet();
         return enrollment != null ? enrollment.trackedEntityInstance() : null;
+    }
+
+    @Override
+    public void setTemperatureValue(String targetElemrnt, @NotNull String value) {
+        d2.trackedEntityModule()
+                .trackedEntityDataValues()
+                .value(eventUid, targetElemrnt)
+                .set(value);
+    }
+
+    @Override
+    public Single<List<TrackedEntityDataValue>> getEventDattaValues(@NotNull String eventUid) {
+       return d2.trackedEntityModule().trackedEntityDataValues()
+                .byEvent()
+                .eq(eventUid)
+                .get();
     }
 }
 

@@ -1,6 +1,7 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture
 
 import android.content.Context
+import androidx.activity.result.ActivityResultLauncher
 import dagger.Module
 import dagger.Provides
 import io.reactivex.processors.FlowableProcessor
@@ -26,6 +27,7 @@ import org.dhis2.mobileProgramRules.EvaluationType
 import org.dhis2.mobileProgramRules.RuleEngineHelper
 import org.dhis2.mobileProgramRules.RulesRepository
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.EventCaptureContract.EventCaptureRepository
+//import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.temprecCoder.TemperatureSensorManager
 import org.dhis2.utils.customviews.navigationbar.NavigationPageConfigurator
 import org.hisp.dhis.android.core.D2
 
@@ -121,4 +123,19 @@ class EventCaptureModule(
     ): NavigationPageConfigurator {
         return EventPageConfigurator(repository, isPortrait)
     }
+
+//    @Provides
+//    @PerActivity
+//    fun providedSensorManager(): TemperatureSensorManager{
+//        return TemperatureSensorManager(
+//            view.context,
+//            activityPermissionsLauncher,
+//
+//
+//
+//
+//        )
+//    }
+
+
 }

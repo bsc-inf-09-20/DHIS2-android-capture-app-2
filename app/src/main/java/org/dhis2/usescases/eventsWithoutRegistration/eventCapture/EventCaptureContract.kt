@@ -1,5 +1,6 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture
 
+import android.content.Intent
 import androidx.compose.runtime.State
 import androidx.lifecycle.LiveData
 import io.reactivex.Flowable
@@ -11,6 +12,7 @@ import org.dhis2.utils.customviews.navigationbar.NavigationPage
 import org.hisp.dhis.android.core.common.ValidationStrategy
 import org.hisp.dhis.android.core.event.EventStatus
 import org.hisp.dhis.android.core.organisationunit.OrganisationUnit
+import org.hisp.dhis.android.core.trackedentity.TrackedEntityDataValue
 import java.util.Date
 
 class EventCaptureContract {
@@ -29,6 +31,8 @@ class EventCaptureContract {
         fun hideProgress()
         fun showNavigationBar()
         fun hideNavigationBar()
+        fun requestBluetoothPermission(permissionString:String)
+        fun launchBluetooth(intent: Intent)
     }
 
     interface Presenter : AbstractActivityContracts.Presenter {
@@ -83,5 +87,7 @@ class EventCaptureContract {
         fun validationStrategy(): ValidationStrategy
         fun getTeiUid(): String?
         fun getEnrollmentUid(): String?
+        fun setTemperatureValue(targetElement:String,value:String)
+        fun getEventDattaValues(eventUid:String):Single<List<TrackedEntityDataValue>>
     }
 }
