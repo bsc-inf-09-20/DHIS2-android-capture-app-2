@@ -235,7 +235,7 @@ class EventCapturePresenterImpl(
             onSuccess = {
                 if(it.any {it.dataElement()=="X13wO3CXkaj" }){
                     eventCaptureRepository.setTemperatureValue("X13wO3CXkaj", "89")
-                }
+                }   // X13wO3CXkaj
             },
             onError = {
 

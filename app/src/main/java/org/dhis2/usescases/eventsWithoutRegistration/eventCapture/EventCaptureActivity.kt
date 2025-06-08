@@ -1,12 +1,23 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture
 
+import TemperatureSensorManager
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -20,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.databinding.DataBindingUtil
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -48,6 +60,7 @@ import org.dhis2.form.model.EventMode
 import org.dhis2.tracker.relationships.ui.state.RelationshipTopBarIconState
 import org.dhis2.ui.ThemeManager
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.eventCaptureFragment.EventCaptureFormFragment
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.temprecCoder.PermissionManager
 import org.dhis2.usescases.eventsWithoutRegistration.eventDetails.injection.EventDetailsComponent
 import org.dhis2.usescases.eventsWithoutRegistration.eventDetails.injection.EventDetailsComponentProvider
 import org.dhis2.usescases.eventsWithoutRegistration.eventDetails.injection.EventDetailsModule
@@ -74,6 +87,7 @@ import org.hisp.dhis.mobile.ui.designsystem.component.menu.MenuItemStyle
 import org.hisp.dhis.mobile.ui.designsystem.component.menu.MenuLeadingElement
 import org.hisp.dhis.mobile.ui.designsystem.component.navigationBar.NavigationBar
 import org.hisp.dhis.mobile.ui.designsystem.theme.DHIS2Theme
+import timber.log.Timber
 import javax.inject.Inject
 
 class EventCaptureActivity :
@@ -82,7 +96,6 @@ class EventCaptureActivity :
     MapButtonObservable,
     EventDetailsComponentProvider,
     TEIDataActivityContract {
-    private lateinit var binding: ActivityEventCaptureBinding
 
     @Inject
     override lateinit var presenter: EventCaptureContract.Presenter
@@ -94,8 +107,10 @@ class EventCaptureActivity :
     @JvmField
     @Inject
     var themeManager: ThemeManager? = null
+
     private var isEventCompleted = false
     private lateinit var eventMode: EventMode
+    private lateinit var binding: ActivityEventCaptureBinding
 
     @Inject
     lateinit var eventResourcesProvider: EventResourcesProvider
@@ -110,38 +125,67 @@ class EventCaptureActivity :
     private var adapter: EventCapturePagerAdapter? = null
     private var eventViewPager: ViewPager2? = null
     private var dashboardViewModel: DashboardViewModel? = null
+
+    // Bluetooth Temperature Monitoring
+    private lateinit var tempSensorManager: TemperatureSensorManager
+    private lateinit var permissionManager: PermissionManager
+
+    // Permission launchers
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results -> handlePermissionResults(results) }
+
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        try {
+            if (result.resultCode == Activity.RESULT_OK) {
+                if (hasBluetoothPermissions()) {
+                    checkBluetoothAndStartScanning()
+                } else {
+                    showError("Missing required Bluetooth permissions")
+                    requestBluetoothPermissions()
+                }
+            } else {
+                showError("Bluetooth is required for this feature")
+            }
+        } catch (e: SecurityException) {
+            Timber.e(e, "Bluetooth permission error")
+            showError("Bluetooth permission error occurred")
+            requestBluetoothPermissions()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Initialize Dagger component first
         eventUid = intent.getStringExtra(Constants.EVENT_UID)
         programUid = intent.getStringExtra(Constants.PROGRAM_UID)
-        setUpEventCaptureComponent(eventUid!!)
-        teiUid = presenter.getTeiUid()
-        enrollmentUid = presenter.getEnrollmentUid()
-        themeManager!!.setProgramTheme(intent.getStringExtra(Constants.PROGRAM_UID)!!)
+        eventMode = intent.getSerializableExtra(Constants.EVENT_MODE) as EventMode
+        setUpEventCaptureComponent(eventUid ?: "")
+
         super.onCreate(savedInstanceState)
         binding = DataBindingUtil.setContentView(this, R.layout.activity_event_capture)
         binding.presenter = presenter
-        eventViewPager = when {
-            this.isLandscape() -> binding.eventViewLandPager
-            else -> binding.eventViewPager
-        }
-        eventMode = intent.getSerializableExtra(Constants.EVENT_MODE) as EventMode
-        setUpViewPagerAdapter()
-        setUpNavigationBar()
+
+        // Now safe to use injected dependencies
+        teiUid = presenter.getTeiUid()
+        enrollmentUid = presenter.getEnrollmentUid()
+        themeManager?.setProgramTheme(programUid ?: "")
+
+        // Initialize Bluetooth components
+        initializeBluetoothComponents()
+
+        // Setup UI components
+        setupViewPagerAdapter()
+        setupNavigationBar()
         setupMoreOptionsMenu()
+        setupEventCaptureFormLandscape(eventUid ?: "")
 
-        setUpEventCaptureFormLandscape(eventUid ?: "")
-        if (this.isLandscape() && areTeiUidAndEnrollmentUidNotNull()) {
-            val viewModelFactory = this.app().dashboardComponent()?.dashboardViewModelFactory()
-
-            viewModelFactory?.let {
-                dashboardViewModel =
-                    ViewModelProvider(this, viewModelFactory)[DashboardViewModel::class.java]
-                supportFragmentManager.beginTransaction()
-                    .replace(R.id.tei_column, newInstance(programUid, teiUid, enrollmentUid))
-                    .commit()
-                dashboardViewModel?.updateSelectedEventUid(eventUid)
-            }
+        // Setup landscape dashboard if needed
+        if (isLandscape() && areTeiUidAndEnrollmentUidNotNull()) {
+            setupLandscapeDashboard()
         }
+
         showProgress()
         presenter.initNoteCounter()
         presenter.init()
@@ -152,16 +196,81 @@ class EventCaptureActivity :
         }
     }
 
-    private fun setUpViewPagerAdapter() {
-        eventViewPager?.isUserInputEnabled = false
+    private fun initializeBluetoothComponents() {
+        try {
+            permissionManager = PermissionManager(this)
+            tempSensorManager = TemperatureSensorManager.create(
+                context = this,
+                permissionManager = permissionManager,
+                bluetoothIntentLauncher = { intent ->
+                    try {
+                        enableBluetoothLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to launch Bluetooth intent")
+                        showError("Failed to launch Bluetooth settings")
+                    }
+                },
+                permissionLauncher = permissionLauncher,
+                uiMessageHandler = { message, isError ->
+                    if (isError) showError(message) else showMessage(message)
+                }
+            ) ?: run {
+                showError("Bluetooth LE not supported on this device")
+                return
+            }
+
+            tempSensorManager.setStateChangeListener(createStateChangeListener())
+            startTemperatureMonitoring()
+        } catch (e: Exception) {
+            Timber.e(e, "Bluetooth initialization failed")
+            showError("Bluetooth initialization failed")
+        }
+    }
+
+    private fun createStateChangeListener(): TemperatureSensorManager.StateChangeListener {
+        return object : TemperatureSensorManager.StateChangeListener {
+            override fun onScanStarted() {
+                showMessage("Scanning for temperature sensor...")
+            }
+
+            override fun onScanStopped() {}
+            override fun onScanFailed(errorCode: Int) {
+                showError("Failed to scan for device: error $errorCode")
+            }
+
+            @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+            override fun onDeviceConnected(device: BluetoothDevice) {
+                showMessage("Connected to ${device.name}")
+            }
+
+            override fun onDeviceDisconnected() {
+                showError("Device disconnected")
+            }
+
+            override fun onTemperatureUpdate(temperature: Float) {
+                showMessage("Temperature: $temperature°C")
+            }
+
+            override fun onConnectionAttempt(attempt: Int) {
+                showMessage("Connection attempt $attempt of ${TemperatureSensorManager.MAX_CONNECTION_ATTEMPTS}")
+            }
+
+            override fun onError(message: String, isCritical: Boolean) {
+                showError(message)
+            }
+        }
+    }
+
+    override fun setupViewPagerAdapter() {
+        eventViewPager = if (isLandscape()) binding.eventViewLandPager else binding.eventViewPager
         adapter = EventCapturePagerAdapter(
             this,
-            intent.getStringExtra(Constants.PROGRAM_UID) ?: "",
-            intent.getStringExtra(Constants.EVENT_UID) ?: "",
-            pageConfigurator!!.displayAnalytics(),
-            pageConfigurator!!.displayRelationships(),
+            programUid ?: "",
+            eventUid ?: "",
+            pageConfigurator?.displayAnalytics() ?: false,
+            pageConfigurator?.displayRelationships() ?: false,
             intent.getBooleanExtra(OPEN_ERROR_LOCATION, false),
-            eventMode,
+            eventMode
         )
         eventViewPager?.adapter = adapter
         eventViewPager?.registerOnPageChangeCallback(object : OnPageChangeCallback() {
@@ -179,7 +288,7 @@ class EventCaptureActivity :
         })
     }
 
-    private fun setUpNavigationBar() {
+    override fun setupNavigationBar() {
         eventViewPager?.registerOnPageChangeCallback(
             object : OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
@@ -195,7 +304,7 @@ class EventCaptureActivity :
                     mutableIntStateOf(
                         uiState.items.indexOfFirst {
                             it.id == uiState.selectedItem
-                        },
+                        }
                     )
                 }
 
@@ -210,42 +319,73 @@ class EventCaptureActivity :
                         selectedItemIndex = selectedItemIndex,
                     ) { page ->
                         presenter.onNavigationPageChanged(page)
-                        eventViewPager?.currentItem = adapter!!.getDynamicTabIndex(page)
+                        eventViewPager?.currentItem = adapter?.getDynamicTabIndex(page) ?: 0
                     }
                 }
             }
         }
     }
 
-    private fun setUpEventCaptureFormLandscape(eventUid: String) {
-        if (this.isLandscape()) {
+    private fun setupMoreOptionsMenu() {
+        binding.moreOptions.setContent {
+            var expanded by remember { mutableStateOf(false) }
+
+            MoreOptionsWithDropDownMenuButton(
+                getMenuItems(),
+                expanded,
+                onMenuToggle = { expanded = it },
+            ) { itemId ->
+                when (itemId) {
+                    EventCaptureMenuItem.SHOW_HELP -> {
+                        analyticsHelper().setEvent(SHOW_HELP, CLICK, SHOW_HELP)
+                        showTutorial(false)
+                    }
+                    EventCaptureMenuItem.DELETE -> confirmDeleteEvent()
+                }
+            }
+        }
+    }
+
+    override fun setupEventCaptureFormLandscape(eventUid: String) {
+        if (isLandscape()) {
             supportFragmentManager.beginTransaction()
                 .replace(
                     R.id.event_form,
-                    EventCaptureFormFragment.newInstance(eventUid, false, eventMode),
+                    EventCaptureFormFragment.newInstance(eventUid, false, eventMode)
                 )
                 .commit()
         }
     }
 
+    private fun setupLandscapeDashboard() {
+        val viewModelFactory = app().dashboardComponent()?.dashboardViewModelFactory()
+        viewModelFactory?.let { factory ->
+            dashboardViewModel = ViewModelProvider(this, factory)[DashboardViewModel::class.java]
+            supportFragmentManager.beginTransaction()
+                .replace(
+                    R.id.tei_column,
+                    newInstance(programUid ?: "", teiUid ?: "", enrollmentUid ?: "")
+                )
+                .commit()
+            eventUid?.let { dashboardViewModel?.updateSelectedEventUid(it) }
+        }
+    }
+
     private fun setUpEventCaptureComponent(eventUid: String) {
-        eventCaptureComponent = app().userComponent()!!.plus(
+        eventCaptureComponent = app().userComponent()?.plus(
             EventCaptureModule(
                 this,
                 eventUid,
-                this.isPortrait(),
-            ),
+                isPortrait()
+            )
         )
-        eventCaptureComponent!!.inject(this)
+        eventCaptureComponent?.inject(this)
     }
 
     private fun updateLandscapeViewsOnEventChange(newEventUid: String) {
         if (newEventUid != this.eventUid) {
             this.eventUid = newEventUid
             setUpEventCaptureComponent(newEventUid)
-            setUpViewPagerAdapter()
-            setUpNavigationBar()
-            setUpEventCaptureFormLandscape(newEventUid)
             showProgress()
             presenter.initNoteCounter()
             presenter.init()
@@ -253,34 +393,154 @@ class EventCaptureActivity :
     }
 
     private fun areTeiUidAndEnrollmentUidNotNull(): Boolean {
-        return teiUid != null && enrollmentUid != null
+        return !teiUid.isNullOrEmpty() && !enrollmentUid.isNullOrEmpty()
     }
 
-    fun openDetails() {
-        presenter.onNavigationPageChanged(NavigationPage.DETAILS)
+    private fun isLandscape(): Boolean {
+        return resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     }
 
-    fun openForm() {
-        supportFragmentManager.findFragmentByTag("EVENT_SYNC")?.let {
-            if (it is SyncStatusDialog) {
-                it.dismiss()
-            }
+    /* Bluetooth Methods */
+    private fun startTemperatureMonitoring() {
+        if (!::tempSensorManager.isInitialized) {
+            showError("Temperature sensor manager not initialized")
+            return
         }
-        presenter.onNavigationPageChanged(NavigationPage.DATA_ENTRY)
+        if (hasBluetoothPermissions()) {
+            checkBluetoothAndStartScanning()
+        } else {
+            requestBluetoothPermissions()
+        }
     }
 
+    private fun hasBluetoothPermissions(): Boolean {
+        return try {
+            permissionManager.hasAllPermissions(permissionManager.checkBluetoothPermissions())
+        } catch (e: Exception) {
+            Timber.e(e, "Permission check failed")
+            false
+        }
+    }
+
+    private fun requestBluetoothPermissions() {
+        try {
+            val permissions = permissionManager.checkBluetoothPermissions()
+            permissionLauncher.launch(permissions)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to request permissions")
+            showError("Failed to request permissions")
+        }
+    }
+
+    private fun handlePermissionResults(results: Map<String, Boolean>) {
+        try {
+            when {
+                results.all { it.value } -> checkBluetoothAndStartScanning()
+                results.any { !it.value } -> showError("Some permissions were denied")
+                else -> showError("Permissions were not granted")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error handling permission results")
+            showError("Error handling permissions")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun checkBluetoothAndStartScanning() {
+        try {
+            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+            when {
+                bluetoothAdapter == null -> showError("Bluetooth not supported")
+                !bluetoothAdapter.isEnabled -> {
+                    showMessage("Enabling Bluetooth...")
+                    val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                    enableBluetoothLauncher.launch(enableBtIntent)
+                }
+                else -> startBluetoothScanning()
+            }
+        } catch (e: SecurityException) {
+            Timber.e(e, "Bluetooth permission error")
+            showError("Bluetooth permission error")
+            requestBluetoothPermissions()
+        } catch (e: Exception) {
+            Timber.e(e, "Bluetooth check failed")
+            showError("Bluetooth check failed")
+        }
+    }
+
+    @Throws(SecurityException::class)
+    private fun startBluetoothScanning() {
+        if (!hasBluetoothPermissions()) {
+            throw SecurityException("Missing required Bluetooth permissions")
+        }
+        try {
+            if (!::tempSensorManager.isInitialized) {
+                throw IllegalStateException("Temperature sensor manager not initialized")
+            }
+            tempSensorManager.startScan()
+            showMessage("Scanning for devices...")
+        } catch (e: SecurityException) {
+            Timber.e(e, "Bluetooth scan permission denied")
+            showError("Bluetooth scan permission denied")
+            requestBluetoothPermissions()
+        } catch (e: Exception) {
+            Timber.e(e, "Bluetooth scan failed")
+            showError("Bluetooth scan failed")
+        }
+    }
+
+    /* Activity Lifecycle */
     override fun onResume() {
         super.onResume()
-        presenter.refreshTabCounters()
-        with(dashboardViewModel) {
-            this?.selectedEventUid()
-                ?.observe(this@EventCaptureActivity, ::updateLandscapeViewsOnEventChange)
+        try {
+            presenter.refreshTabCounters()
+            dashboardViewModel?.selectedEventUid()?.observe(this) { eventUid ->
+                updateLandscapeViewsOnEventChange(eventUid)
+            }
+
+            if (hasBluetoothPermissions()) {
+                checkBluetoothAndStartScanning()
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error in onResume")
         }
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    override fun onPause() {
+        super.onPause()
+        try {
+            if (::tempSensorManager.isInitialized) {
+                tempSensorManager.disconnect()
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error stopping Bluetooth")
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     override fun onDestroy() {
-        presenter.onDettach()
         super.onDestroy()
+        try {
+            if (::tempSensorManager.isInitialized) {
+                tempSensorManager.disconnect()
+                tempSensorManager.setStateChangeListener(null)
+            }
+            presenter.onDettach()
+        } catch (e: Exception) {
+            Timber.e(e, "Error in onDestroy")
+        }
+    }
+
+    /* UI Helper Methods */
+    private fun showMessage(message: String) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
+        Timber.d(message)
+    }
+
+    private fun showError(message: String) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+        Timber.e(message)
     }
 
     override fun goBack() {
@@ -312,9 +572,7 @@ class EventCaptureActivity :
             )
             val dialog = BottomSheetDialog(
                 bottomSheetDialogUiModel,
-                {
-                    /*Unused*/
-                },
+                { /*Unused*/ },
                 { presenter.deleteEvent() },
                 showTopDivider = true,
             )
@@ -327,7 +585,7 @@ class EventCaptureActivity :
     }
 
     private fun isFormScreen(): Boolean {
-        return if (this.isPortrait()) {
+        return if (isPortrait()) {
             adapter?.isFormScreenShown(binding.eventViewPager?.currentItem) == true
         } else {
             true
@@ -366,9 +624,7 @@ class EventCaptureActivity :
         if (isEventCompleted) {
             intent.putExtra(
                 Constants.EVENT_UID,
-                getIntent().getStringExtra(
-                    Constants.EVENT_UID,
-                ),
+                getIntent().getStringExtra(Constants.EVENT_UID),
             )
         }
         setResult(RESULT_OK, intent)
@@ -377,27 +633,6 @@ class EventCaptureActivity :
 
     override fun renderInitialInfo(stageName: String) {
         binding.programStageName.text = stageName
-    }
-
-    private fun setupMoreOptionsMenu() {
-        binding.moreOptions.setContent {
-            var expanded by remember { mutableStateOf(false) }
-
-            MoreOptionsWithDropDownMenuButton(
-                getMenuItems(),
-                expanded,
-                onMenuToggle = { expanded = it },
-            ) { itemId ->
-                when (itemId) {
-                    EventCaptureMenuItem.SHOW_HELP -> {
-                        analyticsHelper().setEvent(SHOW_HELP, CLICK, SHOW_HELP)
-                        showTutorial(false)
-                    }
-
-                    EventCaptureMenuItem.DELETE -> confirmDeleteEvent()
-                }
-            }
-        }
     }
 
     private fun getMenuItems(): List<MenuItemData<EventCaptureMenuItem>> {
@@ -501,16 +736,25 @@ class EventCaptureActivity :
     }
 
     override fun requestBluetoothPermission(permissionString: String) {
-       val s = ""
+        // Implementation not needed as we're using the new permission manager
     }
-
-
 
     override fun launchBluetooth(intent: Intent) {
-     val gh = ""
+        // Implementation not needed as we're using the new launcher
     }
 
+    fun openDetails() {
+        presenter.onNavigationPageChanged(NavigationPage.DETAILS)
+    }
 
+    fun openForm() {
+        supportFragmentManager.findFragmentByTag("EVENT_SYNC")?.let {
+            if (it is SyncStatusDialog) {
+                it.dismiss()
+            }
+        }
+        presenter.onNavigationPageChanged(NavigationPage.DATA_ENTRY)
+    }
 
     override fun relationshipMap(): LiveData<Boolean> {
         return relationshipMapButton
@@ -532,7 +776,6 @@ class EventCaptureActivity :
                     }
                 }
             }
-
             else -> {
                 binding.relationshipIcon.visibility = View.GONE
             }
@@ -540,7 +783,7 @@ class EventCaptureActivity :
     }
 
     override fun provideEventDetailsComponent(module: EventDetailsModule?): EventDetailsComponent? {
-        return eventCaptureComponent!!.plus(module)
+        return eventCaptureComponent?.plus(module)
     }
 
     private fun showSyncDialog(syncType: String) {
@@ -586,7 +829,7 @@ class EventCaptureActivity :
     }
 
     override fun executeOnUIThread() {
-        activity.runOnUiThread {
+        runOnUiThread {
             showDescription(getString(R.string.error_applying_rule_effects))
         }
     }
