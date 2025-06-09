@@ -76,7 +76,7 @@ import org.hisp.dhis.mobile.ui.designsystem.component.navigationBar.NavigationBa
 import org.hisp.dhis.mobile.ui.designsystem.theme.DHIS2Theme
 import javax.inject.Inject
 
-class EventCaptureActivity :
+ class EventCaptureActivity :
     ActivityGlobalAbstract(),
     EventCaptureContract.View,
     MapButtonObservable,
@@ -510,9 +510,12 @@ class EventCaptureActivity :
      val gh = ""
     }
 
+     override fun requestBluetoothPermission() {
+         TODO("Not yet implemented")
+     }
 
 
-    override fun relationshipMap(): LiveData<Boolean> {
+     override fun relationshipMap(): LiveData<Boolean> {
         return relationshipMapButton
     }
 

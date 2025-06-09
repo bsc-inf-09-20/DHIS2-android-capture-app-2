@@ -102,6 +102,7 @@ class EventCapturePresenterImpl(
         }
     }
 
+
     private fun loadBottomBarItems() {
         val navItems = mutableListOf<NavigationBarItem<NavigationPage>>()
 
@@ -238,9 +239,12 @@ class EventCapturePresenterImpl(
                 }
             },
             onError = {
+                    error ->
+                Timber.e(error, "Failed to fetch event data values")
 
             }
             )
+
 
     }
 

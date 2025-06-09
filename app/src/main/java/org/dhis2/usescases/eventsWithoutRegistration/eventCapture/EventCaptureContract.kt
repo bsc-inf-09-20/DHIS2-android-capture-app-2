@@ -33,6 +33,7 @@ class EventCaptureContract {
         fun hideNavigationBar()
         fun requestBluetoothPermission(permissionString:String)
         fun launchBluetooth(intent: Intent)
+        fun requestBluetoothPermission()
     }
 
     interface Presenter : AbstractActivityContracts.Presenter {
