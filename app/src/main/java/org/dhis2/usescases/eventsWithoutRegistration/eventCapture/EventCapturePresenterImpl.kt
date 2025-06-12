@@ -243,7 +243,7 @@ class EventCapturePresenterImpl(
                 Timber.e(error, "Failed to fetch event data values")
 
             }
-            )
+        )
 
 
     }

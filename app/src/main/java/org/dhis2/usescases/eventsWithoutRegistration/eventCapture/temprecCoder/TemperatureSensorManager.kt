@@ -7,11 +7,21 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.*
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.temprecCoder.PermissionManager
 import timber.log.Timber
 import java.nio.ByteBuffer
@@ -33,6 +43,11 @@ class TemperatureSensorManager internal constructor(
         internal const val MAX_CONNECTION_ATTEMPTS = 3
         private const val TAG = "BLEManager"
         private const val RECONNECT_DELAY_MS = 1000L
+
+        // DataStore keys
+        private val TEMPERATURE_KEY = floatPreferencesKey("last_temperature")
+        private val DEVICE_NAME_KEY = stringPreferencesKey("connected_device")
+        private val TIMESTAMP_KEY = longPreferencesKey("last_reading_timestamp")
 
         fun create(
             context: Context,
@@ -79,6 +94,10 @@ class TemperatureSensorManager internal constructor(
     private val scanner by lazy {
         bluetoothAdapter?.bluetoothLeScanner
     }
+
+    // DataStore
+    private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "sensor_data")
+    private val dataStore by lazy { context.dataStore }
 
     // State management
     private enum class ConnectionState {
@@ -196,6 +215,9 @@ class TemperatureSensorManager internal constructor(
                     latestTemperature = ByteBuffer.wrap(temperatureBytes).float
                     stateChangeListener?.onTemperatureUpdate(latestTemperature!!)
                     debugLog("Temperature updated: $latestTemperature")
+
+                    // Save to DataStore
+                    saveTemperatureToDataStore(latestTemperature!!, gatt.device.name)
                 }
             }
         }
@@ -212,6 +234,7 @@ class TemperatureSensorManager internal constructor(
                     if (temperatureBytes != null && temperatureBytes.size >= 4) {
                         latestTemperature = ByteBuffer.wrap(temperatureBytes).float
                         stateChangeListener?.onTemperatureUpdate(latestTemperature!!)
+                        saveTemperatureToDataStore(latestTemperature!!, gatt.device.name)
                     }
                 }
             } else {
@@ -372,6 +395,42 @@ class TemperatureSensorManager internal constructor(
         stateChangeListener?.onError(message, isCritical)
     }
 
+    // DataStore functions
+    private fun saveTemperatureToDataStore(temperature: Float, deviceName: String?) {
+        CoroutineScope(Dispatchers.IO).launch {
+            dataStore.edit { preferences ->
+                preferences[TEMPERATURE_KEY] = temperature
+                deviceName?.let { preferences[DEVICE_NAME_KEY] = it }
+                preferences[TIMESTAMP_KEY] = System.currentTimeMillis()
+            }
+        }
+    }
+
+    fun getLastTemperature(): Flow<Float?> = dataStore.data
+        .map { preferences ->
+            preferences[TEMPERATURE_KEY]
+        }
+
+    fun getLastDeviceName(): Flow<String?> = dataStore.data
+        .map { preferences ->
+            preferences[DEVICE_NAME_KEY]
+        }
+
+    fun getLastReadingTime(): Flow<Long?> = dataStore.data
+        .map { preferences ->
+            preferences[TIMESTAMP_KEY]
+        }
+
+    fun getAllData(): Flow<Map<String, Any?>> = dataStore.data
+        .map { preferences ->
+            mapOf(
+                "temperature" to preferences[TEMPERATURE_KEY],
+                "deviceName" to preferences[DEVICE_NAME_KEY],
+                "timestamp" to preferences[TIMESTAMP_KEY]
+            )
+        }
+
+    // Listener management
     fun setStateChangeListener(listener: StateChangeListener?) {
         stateChangeListener = listener
     }
