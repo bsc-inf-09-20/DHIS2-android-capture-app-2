@@ -1,7 +1,10 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture.eventCaptureFragment
 
+import MyPreferences
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.dhis2.R
 import org.dhis2.commons.resources.ResourceManager
 import org.dhis2.commons.viewmodel.DispatcherProvider
@@ -15,6 +18,7 @@ import org.hisp.dhis.android.core.event.Event
 import org.hisp.dhis.android.core.event.EventEditableStatus
 import org.hisp.dhis.android.core.event.EventNonEditableReason
 import org.hisp.dhis.android.core.event.EventStatus
+import timber.log.Timber
 
 class EventCaptureFormPresenter(
     private val view: EventCaptureFormView,
@@ -99,4 +103,42 @@ class EventCaptureFormPresenter(
         .byName().`in`(AUTH_UNCOMPLETE_EVENT, AUTH_ALL)
         .one()
         .blockingExists()
+
+
+    suspend fun getEventDattaValues(context: Context) {
+
+        val programStage =
+            d2.eventModule()
+                .events()
+                .uid(eventUid)
+                .blockingGet()
+                ?.programStage()
+
+        val programStageDataElements =
+            d2.programModule()
+                .programStageDataElements()
+                .byProgramStage()
+                .eq(programStage)
+                .blockingGet()
+
+//
+        if (
+            programStageDataElements.any { it.dataElement()?.uid() == "X13wO3CXkaj" }
+        ) {
+
+            val prefs = MyPreferences(context)
+            prefs.TempDataFlow.collect {
+
+                Timber.tag("CAPTURE_HERE").d("Sensor reading: ${it.toString()}")
+
+                d2.trackedEntityModule()
+                    .trackedEntityDataValues()
+                    .value(eventUid, "X13wO3CXkaj")
+                    .blockingSet(it.toString())
+            }
+
+
+        }
+
+    }
 }

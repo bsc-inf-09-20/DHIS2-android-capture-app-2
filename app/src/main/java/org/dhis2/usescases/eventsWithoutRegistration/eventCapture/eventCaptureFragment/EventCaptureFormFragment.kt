@@ -8,6 +8,8 @@ import android.view.ViewGroup
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
 import androidx.databinding.DataBindingUtil
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import org.dhis2.R
 import org.dhis2.commons.Constants
 import org.dhis2.commons.extensions.closeKeyboard
@@ -22,6 +24,7 @@ import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.EventCaptureAc
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.EventCaptureActivity
 import org.dhis2.usescases.general.FragmentGlobalAbstract
 import org.dhis2.utils.granularsync.OPEN_ERROR_LOCATION
+import timber.log.Timber
 import javax.inject.Inject
 
 class EventCaptureFormFragment : FragmentGlobalAbstract(), EventCaptureFormView {
@@ -59,6 +62,9 @@ class EventCaptureFormFragment : FragmentGlobalAbstract(), EventCaptureFormView 
                     activity.showProgress()
                 } else {
                     activity.hideProgress()
+                   viewLifecycleOwner.lifecycleScope.launch {
+                       presenter.getEventDattaValues(requireContext())
+                   }
                 }
             }.onItemChangeListener { action: RowAction ->
                 if (action.isEventDetailsRow) {

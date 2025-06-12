@@ -16,6 +16,10 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.temprecCoder.PermissionManager
 import timber.log.Timber
 import java.nio.ByteBuffer
@@ -106,7 +110,7 @@ class TemperatureSensorManager private constructor(
     private var connectionState = ConnectionState.DISCONNECTED
     private var isScanning = false
     private var connectionAttempts = 0
-    private var latestTemperature: Float? = null
+    internal var latestTemperature: Float? = null
     private var targetDevice: BluetoothDevice? = null
     private var stateChangeListener: StateChangeListener? = null
 
@@ -212,17 +216,28 @@ class TemperatureSensorManager private constructor(
             if (characteristic.uuid == CHARACTERISTIC_UUID) {
                 try {
                     val tempString = characteristic.getStringValue(0)
-             //       debugLog("Received temperature string: \"$tempString\"")
 
                     tempString?.let {
                         val tempValue = it.toFloatOrNull()
+
+                        debugLog("TEMP: "+""+tempValue)
+
                         if (tempValue != null && tempValue in 20f..45f) {
                             latestTemperature = tempValue
                             stateChangeListener?.onTemperatureUpdate(tempValue)
-                         //   debugLog("Valid temperature updated: $tempValue°C")
-                            showCenteredMessage(context, "Temperature: $tempValue°C", false)
+
+                            // Save temperature using application context (avoids memory leak)
+                            val appContext = context.applicationContext
+                            val prefs = MyPreferences(appContext)
+                            debugLog("temp:"+""+tempValue)
+
+                            CoroutineScope(Dispatchers.IO).launch {
+                                delay(10000) // Delay for 10 seconds
+                                prefs.saveTempData(tempValue.toString())
+                            }
+
+                            showCenteredMessage(appContext, "Temperature: $tempValue°C", false)
                         } else {
-                           // debugError("Invalid temperature value: $tempString")
                             showCenteredMessage(context, "Invalid temperature reading", true)
                         }
                     }
@@ -231,6 +246,7 @@ class TemperatureSensorManager private constructor(
                 }
             }
         }
+
 
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
