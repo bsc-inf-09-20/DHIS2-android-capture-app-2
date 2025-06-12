@@ -240,19 +240,19 @@ class EventCaptureActivity :
 
             @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
             override fun onDeviceConnected(device: BluetoothDevice) {
-                showMessage("Connected to ${device.name}")
+               // showMessage("Connected to ${device.name}")
             }
 
             override fun onDeviceDisconnected() {
-                showError("Device disconnected")
+               // showError("Device disconnected")
             }
 
             override fun onTemperatureUpdate(temperature: Float) {
-                showMessage("Temperature: $temperature°C")
+              //  showMessage("Temperature: $temperature°C")
             }
 
             override fun onConnectionAttempt(attempt: Int) {
-                showMessage("Connection attempt $attempt of ${TemperatureSensorManager.MAX_CONNECTION_ATTEMPTS}")
+                //showMessage("Connection attempt $attempt of ${TemperatureSensorManager.MAX_CONNECTION_ATTEMPTS}")
             }
 
             override fun onError(message: String, isCritical: Boolean) {
