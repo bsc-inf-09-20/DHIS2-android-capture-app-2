@@ -84,6 +84,10 @@ import org.hisp.dhis.mobile.ui.designsystem.component.navigationBar.NavigationBa
 import org.hisp.dhis.mobile.ui.designsystem.theme.DHIS2Theme
 import timber.log.Timber
 import javax.inject.Inject
+import kotlinx.coroutines.flow.firstOrNull
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import MyPreferences
 
 class EventCaptureActivity :
     ActivityGlobalAbstract(),
@@ -124,6 +128,30 @@ class EventCaptureActivity :
     // Bluetooth Temperature Monitoring
     private lateinit var tempSensorManager: TemperatureSensorManager
     private lateinit var permissionManager: PermissionManager
+
+    private fun saveLatestTemperatureToPreference() {
+        val context = this.applicationContext
+        val prefs = MyPreferences(context)
+
+        lifecycleScope.launch {
+            val latestTemp = tempSensorManager.latestTemperature
+            if (latestTemp != null) {
+                prefs.saveTempData(latestTemp.toString())
+            }
+        }
+    }
+    private fun retrieveLatestTemperatureFromPreference() {
+        val context = this.applicationContext
+        val prefs = MyPreferences(context)
+
+        lifecycleScope.launch {
+            val savedTemp = prefs.TempDataFlow.firstOrNull()
+            savedTemp?.let {
+                showMessage("Saved temp: $it°C")
+            } ?: showMessage("No temperature saved")
+        }
+    }
+
 
     // Permission launchers
     private val permissionLauncher = registerForActivityResult(
@@ -235,15 +263,15 @@ class EventCaptureActivity :
 
             @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
             override fun onDeviceConnected(device: BluetoothDevice) {
-               // showMessage("Connected to ${device.name}")
+                // showMessage("Connected to ${device.name}")
             }
 
             override fun onDeviceDisconnected() {
-               // showError("Device disconnected")
+                // showError("Device disconnected")
             }
 
             override fun onTemperatureUpdate(temperature: Float) {
-              //  showMessage("Temperature: $temperature°C")
+                //  showMessage("Temperature: $temperature°C")
             }
 
             override fun onConnectionAttempt(attempt: Int) {
@@ -365,17 +393,18 @@ class EventCaptureActivity :
             eventUid?.let { dashboardViewModel?.updateSelectedEventUid(it) }
         }
     }
-
     private fun setUpEventCaptureComponent(eventUid: String) {
         eventCaptureComponent = app().userComponent()?.plus(
             EventCaptureModule(
-                this,
-                eventUid,
-                isPortrait()
+                view = this,
+                eventUid = eventUid,
+                isPortrait = isPortrait(),
+                context = this
             )
         )
         eventCaptureComponent?.inject(this)
     }
+
 
     private fun updateLandscapeViewsOnEventChange(newEventUid: String) {
         if (newEventUid != this.eventUid) {
@@ -496,10 +525,14 @@ class EventCaptureActivity :
             if (hasBluetoothPermissions()) {
                 checkBluetoothAndStartScanning()
             }
+
+            // Fetch stored temperature when returning to screen
+            retrieveLatestTemperatureFromPreference()
         } catch (e: Exception) {
             Timber.e(e, "Error in onResume")
         }
     }
+
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     override fun onPause() {

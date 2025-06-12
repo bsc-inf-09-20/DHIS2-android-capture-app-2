@@ -7,20 +7,18 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
+import android.graphics.Color
+import android.os.*
 import android.util.Log
+import android.view.Gravity
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.*
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.temprecCoder.PermissionManager
 import timber.log.Timber
@@ -28,7 +26,7 @@ import java.nio.ByteBuffer
 import java.util.*
 
 @SuppressLint("MissingPermission")
-class TemperatureSensorManager internal constructor(
+class TemperatureSensorManager private constructor(
     private val context: Context,
     private val permissionManager: PermissionManager,
     private val bluetoothIntentLauncher: (Intent) -> Unit,
@@ -43,11 +41,6 @@ class TemperatureSensorManager internal constructor(
         internal const val MAX_CONNECTION_ATTEMPTS = 3
         private const val TAG = "BLEManager"
         private const val RECONNECT_DELAY_MS = 1000L
-
-        // DataStore keys
-        private val TEMPERATURE_KEY = floatPreferencesKey("last_temperature")
-        private val DEVICE_NAME_KEY = stringPreferencesKey("connected_device")
-        private val TIMESTAMP_KEY = longPreferencesKey("last_reading_timestamp")
 
         fun create(
             context: Context,
@@ -66,8 +59,7 @@ class TemperatureSensorManager internal constructor(
                     uiMessageHandler
                 )
             } else {
-                debugError("Bluetooth LE not supported on this device")
-                uiMessageHandler("Bluetooth LE not supported", true)
+                showCenteredMessage(context, "Bluetooth LE not supported", true)
                 null
             }
         }
@@ -80,6 +72,20 @@ class TemperatureSensorManager internal constructor(
         private fun debugError(message: String) {
             Timber.tag(TAG).e(message)
             Log.e(TAG, message)
+        }
+
+        private fun showCenteredMessage(context: Context, message: String, isError: Boolean) {
+            Handler(Looper.getMainLooper()).post {
+                val toast = Toast.makeText(context, message, Toast.LENGTH_LONG)
+                toast.setGravity(Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 100)
+                val view = toast.view
+                view?.setBackgroundColor(if (isError) Color.RED else Color.BLUE)
+                val text = view?.findViewById<TextView>(android.R.id.message)
+                text?.setTextColor(Color.WHITE)
+                text?.textSize = 18f
+                toast.duration = Toast.LENGTH_LONG
+                toast.show()
+            }
         }
     }
 
@@ -95,10 +101,6 @@ class TemperatureSensorManager internal constructor(
         bluetoothAdapter?.bluetoothLeScanner
     }
 
-    // DataStore
-    private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "sensor_data")
-    private val dataStore by lazy { context.dataStore }
-
     // State management
     private enum class ConnectionState {
         DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING
@@ -108,7 +110,7 @@ class TemperatureSensorManager internal constructor(
     private var connectionState = ConnectionState.DISCONNECTED
     private var isScanning = false
     private var connectionAttempts = 0
-    private var latestTemperature: Float? = null
+    internal var latestTemperature: Float? = null
     private var targetDevice: BluetoothDevice? = null
     private var stateChangeListener: StateChangeListener? = null
 
@@ -118,10 +120,11 @@ class TemperatureSensorManager internal constructor(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             super.onScanResult(callbackType, result)
             result.device?.takeIf { it.name == TARGET_DEVICE_NAME }?.let { device ->
-                debugLog("Found target device: ${device.name}")
+               // debugLog("Found target device: ${device.name}")
                 targetDevice = device
                 stopScan()
                 connectToDevice(device)
+                showCenteredMessage(context, "Device found: ${device.name}", false)
             }
         }
 
@@ -148,13 +151,13 @@ class TemperatureSensorManager internal constructor(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
-                        debugLog("Connected to $deviceAddress")
+                       // debugLog("Connected to $deviceAddress")
                         connectionState = ConnectionState.CONNECTED
                         connectionAttempts = 0
                         handler.removeCallbacksAndMessages(null)
                         stateChangeListener?.onDeviceConnected(gatt.device)
+                        showCenteredMessage(context, "Connected to device", false)
 
-                        // Discover services after successful connection
                         if (!gatt.discoverServices()) {
                             handleError("Failed to start service discovery", true)
                             disconnect()
@@ -165,15 +168,15 @@ class TemperatureSensorManager internal constructor(
                     }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    debugLog("Disconnected from $deviceAddress")
+                   // debugLog("Disconnected from $deviceAddress")
                     connectionState = ConnectionState.DISCONNECTED
                     stateChangeListener?.onDeviceDisconnected()
+                    showCenteredMessage(context, "Disconnected from device", true)
 
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         handleError("Disconnected with error status $status", true)
                     }
 
-                    // Attempt reconnect if this was unexpected
                     if (status != BluetoothGatt.GATT_SUCCESS && connectionAttempts < MAX_CONNECTION_ATTEMPTS) {
                         attemptReconnect()
                     } else {
@@ -185,12 +188,13 @@ class TemperatureSensorManager internal constructor(
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                debugLog("Services discovered")
+               // debugLog("Services discovered")
                 val service = gatt.getService(SERVICE_UUID)
                 if (service != null) {
                     val characteristic = service.getCharacteristic(CHARACTERISTIC_UUID)
                     if (characteristic != null) {
                         setupCharacteristicNotifications(gatt, characteristic)
+                        //showCenteredMessage(context, "Service discovered", false)
                     } else {
                         handleError("Temperature characteristic not found", true)
                         disconnect()
@@ -210,32 +214,64 @@ class TemperatureSensorManager internal constructor(
             characteristic: BluetoothGattCharacteristic
         ) {
             if (characteristic.uuid == CHARACTERISTIC_UUID) {
-                val temperatureBytes = characteristic.value
-                if (temperatureBytes != null && temperatureBytes.size >= 4) {
-                    latestTemperature = ByteBuffer.wrap(temperatureBytes).float
-                    stateChangeListener?.onTemperatureUpdate(latestTemperature!!)
-                    debugLog("Temperature updated: $latestTemperature")
+                try {
+                    val tempString = characteristic.getStringValue(0)
 
-                    // Save to DataStore
-                    saveTemperatureToDataStore(latestTemperature!!, gatt.device.name)
+                    tempString?.let {
+                        val tempValue = it.toFloatOrNull()
+
+                        debugLog("TEMP: "+""+tempValue)
+
+                        if (tempValue != null && tempValue in 20f..45f) {
+                            latestTemperature = tempValue
+                            stateChangeListener?.onTemperatureUpdate(tempValue)
+
+                            // Save temperature using application context (avoids memory leak)
+                            val appContext = context.applicationContext
+                            val prefs = MyPreferences(appContext)
+                            debugLog("temp:"+""+tempValue)
+
+                            CoroutineScope(Dispatchers.IO).launch {
+                                delay(10000) // Delay for 10 seconds
+                                prefs.saveTempData(tempValue.toString())
+                            }
+
+                            showCenteredMessage(appContext, "Temperature: $tempValue°C", false)
+                        } else {
+                            showCenteredMessage(context, "Invalid temperature reading", true)
+                        }
+                    }
+                } catch (e: Exception) {
+                    handleError("Failed to parse temperature: ${e.message}", false)
                 }
             }
         }
+
 
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                debugLog("Characteristic read successfully")
-                if (characteristic.uuid == CHARACTERISTIC_UUID) {
-                    val temperatureBytes = characteristic.value
-                    if (temperatureBytes != null && temperatureBytes.size >= 4) {
-                        latestTemperature = ByteBuffer.wrap(temperatureBytes).float
-                        stateChangeListener?.onTemperatureUpdate(latestTemperature!!)
-                        saveTemperatureToDataStore(latestTemperature!!, gatt.device.name)
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == CHARACTERISTIC_UUID) {
+                try {
+                    val tempString = characteristic.getStringValue(0)
+                 //   debugLog("Read temperature string: \"$tempString\"")
+
+                    tempString?.let {
+                        val tempValue = it.toFloatOrNull()
+                        if (tempValue != null && tempValue in 20f..45f) {
+                            latestTemperature = tempValue
+                            stateChangeListener?.onTemperatureUpdate(tempValue)
+                       //     debugLog("Valid temperature read: $tempValue°C")
+                            showCenteredMessage(context, "Temperature: $tempValue°C", false)
+                        } else {
+                    //        debugError("Invalid temperature value: $tempString")
+                            showCenteredMessage(context, "Invalid temperature reading", true)
+                        }
                     }
+                } catch (e: Exception) {
+                    handleError("Failed to parse temperature: ${e.message}", false)
                 }
             } else {
                 handleError("Characteristic read failed: $status", false)
@@ -270,11 +306,11 @@ class TemperatureSensorManager internal constructor(
         }
 
         if (isScanning || connectionState != ConnectionState.DISCONNECTED) {
-            debugLog("Already scanning or connected/connecting")
+           // debugLog("Already scanning or connected/connecting")
             return
         }
 
-        debugLog("Starting BLE scan")
+       // debugLog("Starting BLE scan")
         isScanning = true
         connectionState = ConnectionState.CONNECTING
         stateChangeListener?.onScanStarted()
@@ -282,9 +318,11 @@ class TemperatureSensorManager internal constructor(
         // Set scan timeout
         handler.postDelayed({
             if (isScanning) {
-                debugLog("Scan timed out")
+                //debugLog("Scan timed out")
+                showCenteredMessage(context, "Scan timed out", true)
                 stopScan()
-                handleError("Device not found", true)
+             //   handleError("Device not found", true)
+                showCenteredMessage(context, "Device not found", true)
             }
         }, SCAN_TIMEOUT_MS)
 
@@ -299,7 +337,7 @@ class TemperatureSensorManager internal constructor(
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     private fun stopScan() {
         if (isScanning) {
-            debugLog("Stopping BLE scan")
+           // debugLog("Stopping BLE scan")
             scanner?.stopScan(scanCallback)
             isScanning = false
             handler.removeCallbacksAndMessages(null)
@@ -310,7 +348,7 @@ class TemperatureSensorManager internal constructor(
     @RequiresApi(Build.VERSION_CODES.M)
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun connectToDevice(device: BluetoothDevice) {
-        debugLog("Attempting to connect to ${device.address}")
+      //  debugLog("Attempting to connect to ${device.address}")
         connectionState = ConnectionState.CONNECTING
         stateChangeListener?.onConnectionAttempt(connectionAttempts + 1)
 
@@ -326,12 +364,13 @@ class TemperatureSensorManager internal constructor(
     fun disconnect() {
         when (connectionState) {
             ConnectionState.CONNECTED, ConnectionState.CONNECTING -> {
-                debugLog("Disconnecting from device")
+               // debugLog("")
+                showCenteredMessage(context, "Disconnecting from device", true)
                 connectionState = ConnectionState.DISCONNECTING
                 bluetoothGatt?.disconnect()
             }
             else -> {
-                debugLog("Not connected, no need to disconnect")
+              //  debugLog("Not connected, no need to disconnect")
             }
         }
     }
@@ -339,7 +378,7 @@ class TemperatureSensorManager internal constructor(
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun readTemperature() {
         if (connectionState != ConnectionState.CONNECTED) {
-            handleError("Not connected to device", true)
+         //   handleError("Not connected to device", true)
             return
         }
 
@@ -347,19 +386,19 @@ class TemperatureSensorManager internal constructor(
             if (!bluetoothGatt?.readCharacteristic(it)!!) {
                 handleError("Failed to read temperature", false)
             }
-        } ?: handleError("Service or characteristic not available", true)
+        } //?: handleError("Service or characteristic not available", true)
     }
 
     @RequiresApi(Build.VERSION_CODES.M)
     private fun attemptReconnect() {
         connectionAttempts++
         if (connectionAttempts <= MAX_CONNECTION_ATTEMPTS) {
-            debugLog("Attempting reconnect ($connectionAttempts/$MAX_CONNECTION_ATTEMPTS)")
+         //   debugLog("Attempting reconnect ($connectionAttempts/$MAX_CONNECTION_ATTEMPTS)")
             handler.postDelayed({
                 targetDevice?.let { connectToDevice(it) }
             }, RECONNECT_DELAY_MS)
         } else {
-            handleError("Max connection attempts reached", true)
+          //  handleError("Max connection attempts reached", true)
             cleanup()
         }
     }
@@ -395,42 +434,6 @@ class TemperatureSensorManager internal constructor(
         stateChangeListener?.onError(message, isCritical)
     }
 
-    // DataStore functions
-    private fun saveTemperatureToDataStore(temperature: Float, deviceName: String?) {
-        CoroutineScope(Dispatchers.IO).launch {
-            dataStore.edit { preferences ->
-                preferences[TEMPERATURE_KEY] = temperature
-                deviceName?.let { preferences[DEVICE_NAME_KEY] = it }
-                preferences[TIMESTAMP_KEY] = System.currentTimeMillis()
-            }
-        }
-    }
-
-    fun getLastTemperature(): Flow<Float?> = dataStore.data
-        .map { preferences ->
-            preferences[TEMPERATURE_KEY]
-        }
-
-    fun getLastDeviceName(): Flow<String?> = dataStore.data
-        .map { preferences ->
-            preferences[DEVICE_NAME_KEY]
-        }
-
-    fun getLastReadingTime(): Flow<Long?> = dataStore.data
-        .map { preferences ->
-            preferences[TIMESTAMP_KEY]
-        }
-
-    fun getAllData(): Flow<Map<String, Any?>> = dataStore.data
-        .map { preferences ->
-            mapOf(
-                "temperature" to preferences[TEMPERATURE_KEY],
-                "deviceName" to preferences[DEVICE_NAME_KEY],
-                "timestamp" to preferences[TIMESTAMP_KEY]
-            )
-        }
-
-    // Listener management
     fun setStateChangeListener(listener: StateChangeListener?) {
         stateChangeListener = listener
     }

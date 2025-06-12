@@ -7,6 +7,9 @@ import org.dhis2.commons.resources.ResourceManager
 import org.dhis2.form.ui.provider.FormResultDialogProvider
 import org.dhis2.form.ui.provider.FormResultDialogResourcesProvider
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.EventCaptureContract
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.ConfigManager
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.ConfigManagerImpl
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.TemperatureConfiguration
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.domain.ReOpenEventUseCase
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.injection.EventDispatchers
 import org.hisp.dhis.android.core.D2
@@ -24,7 +27,7 @@ class EventCaptureFormModule(
         d2: D2,
         resourceManager: ResourceManager,
         reOpenEventUseCase: ReOpenEventUseCase,
-        eventDispatchers: EventDispatchers,
+        eventDispatchers: EventDispatchers
     ): EventCaptureFormPresenter {
         return EventCaptureFormPresenter(
             view,
@@ -33,8 +36,8 @@ class EventCaptureFormModule(
             eventUid,
             resourceManager,
             reOpenEventUseCase,
-            eventDispatchers,
-        )
+            eventDispatchers
+                 )
     }
 
     @Provides

@@ -1,7 +1,11 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture.eventCaptureFragment
 
+import MyPreferences
+import android.content.Context
+import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.dhis2.R
 import org.dhis2.commons.resources.ResourceManager
 import org.dhis2.commons.viewmodel.DispatcherProvider
@@ -9,12 +13,16 @@ import org.dhis2.data.dhislogic.AUTH_ALL
 import org.dhis2.data.dhislogic.AUTH_UNCOMPLETE_EVENT
 import org.dhis2.usescases.eventsWithoutRegistration.EventIdlingResourceSingleton
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.EventCaptureContract
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.ConfigManager
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.ConfigManagerImpl
+import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.configNetworkModules.TemperatureConfiguration
 import org.dhis2.usescases.eventsWithoutRegistration.eventCapture.domain.ReOpenEventUseCase
 import org.hisp.dhis.android.core.D2
 import org.hisp.dhis.android.core.event.Event
 import org.hisp.dhis.android.core.event.EventEditableStatus
 import org.hisp.dhis.android.core.event.EventNonEditableReason
 import org.hisp.dhis.android.core.event.EventStatus
+import timber.log.Timber
 
 class EventCaptureFormPresenter(
     private val view: EventCaptureFormView,
@@ -23,7 +31,7 @@ class EventCaptureFormPresenter(
     private val eventUid: String,
     private val resourceManager: ResourceManager,
     private val reOpenEventUseCase: ReOpenEventUseCase,
-    private val dispatcherProvider: DispatcherProvider,
+    private val dispatcherProvider: DispatcherProvider
 ) {
 
     fun showOrHideSaveButton() {
@@ -99,4 +107,58 @@ class EventCaptureFormPresenter(
         .byName().`in`(AUTH_UNCOMPLETE_EVENT, AUTH_ALL)
         .one()
         .blockingExists()
+
+
+    suspend fun getEventDattaValues(context: Context) {
+
+        val json = d2.dataStoreModule().dataStore()
+            .byNamespace()
+            .eq("Temperature-configuration")
+            .byKey()
+            .eq("temp-config")
+            .blockingGet()
+
+        val mappedRules = json.map {
+            Gson().fromJson(
+                it.value()?.split("json=")[1]?.split(")")[0],
+                TemperatureConfiguration::class.java
+            )
+        }
+
+
+        val programStage =
+            d2.eventModule()
+                .events()
+                .uid(eventUid)
+                .blockingGet()
+                ?.programStage()
+
+        val programStageDataElements =
+            d2.programModule()
+                .programStageDataElements()
+                .byProgramStage()
+                .eq(programStage)
+                .blockingGet()
+
+        programStageDataElements.find {
+            mappedRules[0].mappingRules.map { tempRule -> tempRule.DataElementID }
+                .contains(it.dataElement()?.uid())
+        }.let{foundDe->
+
+            val prefs = MyPreferences(context)
+
+//            Timber.tag("CAPTURE_HERE").d()
+
+            prefs.TempDataFlow.collect {
+
+                Timber.tag("CAPTURE_HERE").d("Sensor reading: ${it.toString()}")
+
+                d2.trackedEntityModule()
+                    .trackedEntityDataValues()
+                    .value(eventUid, foundDe?.dataElement()?.uid().toString())
+                    .blockingSet(it.toString())
+            }
+        }
+
+    }
 }

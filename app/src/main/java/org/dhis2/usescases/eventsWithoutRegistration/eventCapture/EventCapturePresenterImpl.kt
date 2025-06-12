@@ -1,5 +1,6 @@
 package org.dhis2.usescases.eventsWithoutRegistration.eventCapture
 
+import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.StickyNote2
 import androidx.compose.material.icons.automirrored.outlined.StickyNote2
@@ -51,9 +52,7 @@ class EventCapturePresenterImpl(
     var compositeDisposable: CompositeDisposable = CompositeDisposable()
     private var hasExpired = false
     private val notesCounterProcessor: PublishProcessor<Unit> = PublishProcessor.create()
-
     val actions = MutableLiveData<EventCaptureAction>()
-
     private val _navigationBarUIState = mutableStateOf(NavigationBarUIState<NavigationPage>())
 
     override fun observeNavigationBarUIState(): State<NavigationBarUIState<NavigationPage>> {
@@ -74,34 +73,33 @@ class EventCapturePresenterImpl(
                     schedulerProvider,
                     { view.showEventIntegrityAlert() },
                     Timber::e,
-                ),
+                )
         )
+
         compositeDisposable.add(
             Flowable.zip(
                 eventCaptureRepository.programStageName(),
                 eventCaptureRepository.orgUnit(),
-                ::EventCaptureInitialInfo,
+                ::EventCaptureInitialInfo
             ).defaultSubscribe(
                 schedulerProvider,
                 { initialInfo ->
                     preferences.setValue(
                         Preference.CURRENT_ORG_UNIT,
-                        initialInfo.organisationUnit.uid(),
+                        initialInfo.organisationUnit.uid()
                     )
-                    view.renderInitialInfo(
-                        initialInfo.programStageName,
-                    )
+                    view.renderInitialInfo(initialInfo.programStageName)
                 },
-                Timber::e,
-            ),
+                Timber::e
+            )
         )
+
         checkExpiration()
 
         viewModelScope.launch {
             loadBottomBarItems()
         }
     }
-
 
     private fun loadBottomBarItems() {
         val navItems = mutableListOf<NavigationBarItem<NavigationPage>>()
@@ -112,8 +110,8 @@ class EventCapturePresenterImpl(
                     id = NavigationPage.DATA_ENTRY,
                     icon = DHIS2Icons.DataEntryOutline,
                     selectedIcon = DHIS2Icons.DataEntryFilled,
-                    label = resourceManager.getString(R.string.navigation_form),
-                ),
+                    label = resourceManager.getString(R.string.navigation_form)
+                )
             )
         }
 
@@ -123,8 +121,8 @@ class EventCapturePresenterImpl(
                     id = NavigationPage.ANALYTICS,
                     icon = Icons.Outlined.BarChart,
                     selectedIcon = Icons.Filled.BarChart,
-                    label = resourceManager.getString(R.string.navigation_charts),
-                ),
+                    label = resourceManager.getString(R.string.navigation_charts)
+                )
             )
         }
 
@@ -134,8 +132,8 @@ class EventCapturePresenterImpl(
                     id = NavigationPage.RELATIONSHIPS,
                     icon = Icons.Outlined.Hub,
                     selectedIcon = Icons.Filled.Hub,
-                    label = resourceManager.getString(R.string.navigation_relations),
-                ),
+                    label = resourceManager.getString(R.string.navigation_relations)
+                )
             )
         }
 
@@ -145,13 +143,13 @@ class EventCapturePresenterImpl(
                     id = NavigationPage.NOTES,
                     icon = Icons.AutoMirrored.Outlined.StickyNote2,
                     selectedIcon = Icons.AutoMirrored.Filled.StickyNote2,
-                    label = resourceManager.getString(R.string.navigation_notes),
-                ),
+                    label = resourceManager.getString(R.string.navigation_notes)
+                )
             )
         }
 
         _navigationBarUIState.value = _navigationBarUIState.value.copy(
-            items = navItems.takeIf { it.size > 1 }.orEmpty(),
+            items = navItems.takeIf { it.size > 1 }.orEmpty()
         )
     }
 
@@ -160,14 +158,8 @@ class EventCapturePresenterImpl(
     }
 
     override fun onSetNavigationPage(index: Int) {
-        val navigationPageAtIndex = _navigationBarUIState
-            .value
-            .items
-            .getOrNull(index)
-            ?.id
-
-        if (navigationPageAtIndex != null) {
-            onNavigationPageChanged(navigationPageAtIndex)
+        _navigationBarUIState.value.items.getOrNull(index)?.id?.let {
+            onNavigationPageChanged(it)
         }
     }
 
@@ -176,24 +168,14 @@ class EventCapturePresenterImpl(
     }
 
     override fun updateNotesBadge(numberOfNotes: Int) {
-        val navigationBarUIState = _navigationBarUIState.value
-        val indexOfNotesNavigationItem = navigationBarUIState
-            .items
-            .indexOfFirst { it.id == NavigationPage.NOTES }
+        val index = _navigationBarUIState.value.items.indexOfFirst { it.id == NavigationPage.NOTES }
+        val notesItem = _navigationBarUIState.value.items.getOrNull(index)
 
-        val notesNavigationItem = navigationBarUIState
-            .items
-            .getOrNull(indexOfNotesNavigationItem)
+        if (notesItem != null) {
+            val updatedList = _navigationBarUIState.value.items.toMutableList()
+            updatedList[index] = notesItem.copy(showBadge = numberOfNotes > 0)
 
-        if (notesNavigationItem != null) {
-            val updatedList = navigationBarUIState.items.toMutableList()
-            updatedList[indexOfNotesNavigationItem] = notesNavigationItem.copy(
-                showBadge = numberOfNotes > 0,
-            )
-
-            _navigationBarUIState.value = _navigationBarUIState.value.copy(
-                items = updatedList,
-            )
+            _navigationBarUIState.value = _navigationBarUIState.value.copy(items = updatedList)
         }
     }
 
@@ -201,16 +183,14 @@ class EventCapturePresenterImpl(
         if (eventStatus == EventStatus.COMPLETED) {
             compositeDisposable.add(
                 Flowable.fromCallable {
-                    val isCompletedEventExpired =
-                        eventCaptureRepository.isCompletedEventExpired(eventUid).blockingFirst()
-                    val isEventEditable = eventCaptureRepository.isEventEditable(eventUid)
-                    isCompletedEventExpired && !isEventEditable
-                }
-                    .defaultSubscribe(
-                        schedulerProvider,
-                        this::setHasExpired,
-                        Timber::e,
-                    ),
+                    val expired = eventCaptureRepository.isCompletedEventExpired(eventUid).blockingFirst()
+                    val editable = eventCaptureRepository.isEventEditable(eventUid)
+                    expired && !editable
+                }.defaultSubscribe(
+                    schedulerProvider,
+                    this::setHasExpired,
+                    Timber::e
+                )
             )
         } else {
             setHasExpired(!eventCaptureRepository.isEventEditable(eventUid))
@@ -231,21 +211,6 @@ class EventCapturePresenterImpl(
         } else {
             view.finishDataEntry()
         }
-        eventCaptureRepository.getEventDattaValues(eventUid).defaultSubscribe(
-            schedulerProvider,
-            onSuccess = {
-                if(it.any {it.dataElement()=="X13wO3CXkaj" }){
-                    eventCaptureRepository.setTemperatureValue("X13wO3CXkaj", "89")
-                }   // X13wO3CXkaj
-            },
-            onError = {
-                    error ->
-                Timber.e(error, "Failed to fetch event data values")
-
-            }
-        )
-
-
     }
 
     override fun isEnrollmentOpen(): Boolean {
@@ -255,71 +220,65 @@ class EventCapturePresenterImpl(
     override fun completeEvent(addNew: Boolean) {
         EventIdlingResourceSingleton.increment()
         compositeDisposable.add(
-            eventCaptureRepository.completeEvent()
-                .defaultSubscribe(
-                    schedulerProvider,
-                    onNext = {
-                        if (addNew) {
-                            view.restartDataEntry()
-                        } else {
-                            preferences.setValue(Preference.PREF_COMPLETED_EVENT, eventUid)
-                            view.finishDataEntry()
-                        }
-                        EventIdlingResourceSingleton.decrement()
-                    },
-                    onError = {
-                        EventIdlingResourceSingleton.decrement()
-                        Timber.e(it)
-                    },
-                ),
+            eventCaptureRepository.completeEvent().defaultSubscribe(
+                schedulerProvider,
+                onNext = {
+                    if (addNew) {
+                        view.restartDataEntry()
+                    } else {
+                        preferences.setValue(Preference.PREF_COMPLETED_EVENT, eventUid)
+                        view.finishDataEntry()
+                    }
+                    EventIdlingResourceSingleton.decrement()
+                },
+                onError = {
+                    EventIdlingResourceSingleton.decrement()
+                    Timber.e(it)
+                }
+            )
         )
     }
 
     override fun deleteEvent() {
-        val programStage = programStage()
+        val stage = programStage()
         EventIdlingResourceSingleton.increment()
         compositeDisposable.add(
-            eventCaptureRepository.deleteEvent()
-                .defaultSubscribe(
-                    schedulerProvider,
-                    onNext = { result ->
-                        EventIdlingResourceSingleton.decrement()
-                        if (result) {
-                            view.showSnackBar(R.string.event_label_was_deleted, programStage)
-                        }
-                    },
-                    onError = {
-                        EventIdlingResourceSingleton.decrement()
-                        Timber.e(it)
-                    },
-                    onComplete = {
-                        EventIdlingResourceSingleton.decrement()
-                        view.finishDataEntry()
-                    },
-                ),
+            eventCaptureRepository.deleteEvent().defaultSubscribe(
+                schedulerProvider,
+                onNext = {
+                    EventIdlingResourceSingleton.decrement()
+                    if (it) view.showSnackBar(R.string.event_label_was_deleted, stage)
+                },
+                onError = {
+                    EventIdlingResourceSingleton.decrement()
+                    Timber.e(it)
+                },
+                onComplete = {
+                    EventIdlingResourceSingleton.decrement()
+                    view.finishDataEntry()
+                }
+            )
         )
     }
 
     override fun skipEvent() {
         compositeDisposable.add(
-            eventCaptureRepository.updateEventStatus(EventStatus.SKIPPED)
-                .defaultSubscribe(
-                    schedulerProvider,
-                    { view.showSnackBar(R.string.event_label_was_skipped, programStage()) },
-                    Timber::e,
-                    view::finishDataEntry,
-                ),
+            eventCaptureRepository.updateEventStatus(EventStatus.SKIPPED).defaultSubscribe(
+                schedulerProvider,
+                { view.showSnackBar(R.string.event_label_was_skipped, programStage()) },
+                Timber::e,
+                view::finishDataEntry
+            )
         )
     }
 
     override fun rescheduleEvent(time: Date) {
         compositeDisposable.add(
-            eventCaptureRepository.rescheduleEvent(time)
-                .defaultSubscribe(
-                    schedulerProvider,
-                    { view.finishDataEntry() },
-                    Timber::e,
-                ),
+            eventCaptureRepository.rescheduleEvent(time).defaultSubscribe(
+                schedulerProvider,
+                { view.finishDataEntry() },
+                Timber::e
+            )
         )
     }
 
@@ -347,8 +306,8 @@ class EventCapturePresenterImpl(
                     .defaultSubscribe(
                         schedulerProvider,
                         view::updateNoteBadge,
-                        Timber::e,
-                    ),
+                        Timber::e
+                    )
             )
         } else {
             notesCounterProcessor.onNext(Unit())
