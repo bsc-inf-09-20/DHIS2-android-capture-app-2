@@ -147,8 +147,8 @@ class EventCaptureActivity :
         lifecycleScope.launch {
             val savedTemp = prefs.TempDataFlow.firstOrNull()
             savedTemp?.let {
-                showMessage("Saved temp: $it°C")
-            } ?: showMessage("No temperature saved")
+            //    showMessage("Saved temp: $it°C")
+            } //?: showMessage("No temperature saved")
         }
     }
 

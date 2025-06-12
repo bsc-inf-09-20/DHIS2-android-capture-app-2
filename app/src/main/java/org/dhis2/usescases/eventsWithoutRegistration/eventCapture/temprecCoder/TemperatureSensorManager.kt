@@ -319,7 +319,7 @@ class TemperatureSensorManager private constructor(
         handler.postDelayed({
             if (isScanning) {
                 //debugLog("Scan timed out")
-                showCenteredMessage(context, "Scan timed out", true)
+               // showCenteredMessage(context, "Scan timed out", true)
                 stopScan()
              //   handleError("Device not found", true)
                 showCenteredMessage(context, "Device not found", true)
